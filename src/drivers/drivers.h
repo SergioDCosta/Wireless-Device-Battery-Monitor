@@ -50,6 +50,7 @@ const wchar_t *GWolvesModelName(USHORT pid);
 bool GWolvesIsCable(USHORT pid);
 
 // Vendor drivers (run in this order).
+void PollIpi(PollContext& ctx);          // IPI PIAO88 on its 2.4 GHz receiver
 void PollGlorious(PollContext& ctx);  // also Hitscan
 void PollAula(PollContext& ctx);      // AULA F75 / F87 Pro / F99 / HERO 68 Air keyboards (before Kysona)
 void PollDareu(PollContext& ctx);     // DAREU EM901X receiver / cable (split feature/input collections)
