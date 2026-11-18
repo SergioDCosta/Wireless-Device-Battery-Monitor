@@ -4,6 +4,7 @@
 //  * Bluetooth devices: Windows keeps the level it reads over HFP (classic) or the GATT Battery
 //    Service (LE) in a device property, the same value Settings > Bluetooth & devices shows.
 #include "drivers.h"
+#include "ipi_status.h"
 
 #include <setupapi.h>
 #include <cfgmgr32.h>
@@ -167,8 +168,8 @@ void PollGenericHid(PollContext& ctx) {
     }
 }
 
-void PollBluetooth(PollContext& ctx) {
-    HDEVINFO di = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+void PollBluetooth(PollContext& ctx, bool ipiOnly) {
+    HDEVINFO di = SetupDiGetClassDevsW(nullptr, ipiOnly ? L"BTHLE" : nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
     if (di == INVALID_HANDLE_VALUE) return;
 
     struct Found { int pct; std::wstring name; bool connected; };
@@ -262,7 +263,15 @@ void PollBluetooth(PollContext& ctx) {
         if (s.kind == DeviceKind::Other && ids != hidIds.end()) s.kind = KindFromBleIds(ids->second.first, ids->second.second);
         if (s.kind == DeviceKind::Other && ids != hidIds.end()) s.kind = KindFromCollections(ctx.colls, ids->second.first, ids->second.second);
         if (s.kind == DeviceKind::Other) s.kind = GuessKind(s.name);
-        ctx.out.push_back(s);
+        // Keep the original receiver key across transports (hidden/order preferences).
+        // Only a connected Bluetooth result reaches here. A cable reading wins;
+        // otherwise prefer Windows over a dongle still returning its previous report.
+        if (IsIpiBluetooth(s.name, ids == hidIds.end() ? 0 : ids->second.first,
+                           ids == hidIds.end() ? 0 : ids->second.second)) {
+            AddIpiBluetooth(ctx.out, s);
+        } else if (!ipiOnly) {
+            ctx.out.push_back(s);
+        }
         ctx.btContainers.insert(cid);
     }
 }

@@ -5,6 +5,8 @@
 
 off / not connected = desligado / não conectado
 {percent}% (last known) = {percent}% (último conhecido)
+device estimate = estimativa do dispositivo
+Updating = Atualizando
 unknown = desconhecido
 charging = carregando
 asleep = em repouso

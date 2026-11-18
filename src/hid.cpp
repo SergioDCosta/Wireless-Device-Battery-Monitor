@@ -12,7 +12,7 @@
 #include <cstring>
 #include <cwctype>
 
-std::vector<HidColl> EnumHid() {
+std::vector<HidColl> EnumHid(bool (*includePath)(const std::wstring&)) {
     std::vector<HidColl> out;
     GUID hidGuid;
     HidD_GetHidGuid(&hidGuid);
@@ -27,6 +27,9 @@ std::vector<HidColl> EnumHid() {
         auto det = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(buf.data());
         det->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
         if (!SetupDiGetDeviceInterfaceDetailW(di, &ifd, det, need, nullptr, nullptr)) continue;
+        std::wstring lower = det->DevicePath;
+        for (auto& ch : lower) ch = (wchar_t)towlower(ch);
+        if (includePath && !includePath(lower)) continue;
         HANDLE h = CreateFileW(det->DevicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h == INVALID_HANDLE_VALUE) continue;
         HidColl c;
@@ -36,8 +39,6 @@ std::vector<HidColl> EnumHid() {
         PHIDP_PREPARSED_DATA pp;
         if (HidD_GetPreparsedData(h, &pp)) { HidP_GetCaps(pp, &c.caps); HidD_FreePreparsedData(pp); }
         CloseHandle(h);
-        std::wstring lower = c.path;
-        for (auto& ch : lower) ch = towlower(ch);
         size_t mi = lower.find(L"&mi_");
         if (mi != std::wstring::npos) c.iface = (int)wcstol(lower.c_str() + mi + 4, nullptr, 16);
         out.push_back(std::move(c));

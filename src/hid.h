@@ -40,7 +40,11 @@ struct HidColl {
     USHORT featLen() const { return caps.FeatureReportByteLength; }
 };
 
+#ifdef _WIN32
+std::vector<HidColl> EnumHid(bool (*includePath)(const std::wstring&) = nullptr);
+#else
 std::vector<HidColl> EnumHid();
+#endif
 
 class HidDev {
 public:

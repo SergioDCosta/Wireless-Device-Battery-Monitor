@@ -35,17 +35,36 @@ std::vector<std::pair<USHORT, USHORT>> IgnoredDevices() {
     return out;
 }
 
-}  // namespace
+bool IpiHidPath(const std::wstring& path) {
+    return path.find(L"vid_372e&pid_1014") != std::wstring::npos ||
+           path.find(L"vid_372e&pid_1056") != std::wstring::npos ||
+           path.find(L"vid&012e37_pid&1056") != std::wstring::npos;
+}
 
-std::vector<DeviceStatus> PollAllDevices() {
+PollContext BeginPoll(bool ipiOnly) {
     PollContext ctx;
-    ctx.colls = EnumHid();
+    ctx.colls = EnumHid(ipiOnly ? IpiHidPath : nullptr);
     auto ignored = IgnoredDevices();
     if (!ignored.empty())
         ctx.colls.erase(std::remove_if(ctx.colls.begin(), ctx.colls.end(), [&](const HidColl& c) {
                             return std::find(ignored.begin(), ignored.end(), std::make_pair(c.vid, c.pid)) != ignored.end();
                         }),
                         ctx.colls.end());
+    return ctx;
+}
+
+}  // namespace
+
+std::vector<DeviceStatus> PollIpiDevices() {
+    auto ctx = BeginPoll(true);
+    PollIpi(ctx);
+    // The generic Bluetooth poller uses Windows' battery property (no radio commands).
+    if (ctx.out.empty() || ctx.out.front().via != L"USB cable") PollBluetooth(ctx, true);
+    return ctx.out;
+}
+
+std::vector<DeviceStatus> PollAllDevices() {
+    auto ctx = BeginPoll(false);
     PollGlorious(ctx);
     PollIpi(ctx);
     PollAula(ctx);       // before Kysona, which shares the 3554 vendor id and would probe it first

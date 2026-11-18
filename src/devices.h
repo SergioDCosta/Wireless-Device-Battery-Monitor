@@ -16,6 +16,7 @@ struct DeviceStatus {
     bool charging   = false;
     bool asleep     = false;   // receiver answered but the device is sleeping (keep last value)
     bool connected  = true;    // false: receiver present, device switched off (hidden)
+    bool updating   = false;   // a transport change is settling; hide the transient reading
     int  millivolts = 0;       // battery voltage when reported (0 = unknown)
     int  graceSec   = 0;       // keep showing the last value this long if the device stops answering
     unsigned short vid = 0;    // USB / Bluetooth HID vendor id when known (picks the brand color)
@@ -23,6 +24,10 @@ struct DeviceStatus {
 
 // Queries every supported device. Blocking (can take a second or two); call from a worker thread.
 std::vector<DeviceStatus> PollAllDevices();
+
+#ifdef _WIN32
+std::vector<DeviceStatus> PollIpiDevices();  // targeted refresh between regular full polls
+#endif
 
 // Prints every HID collection (for adding support for new devices).
 std::wstring DumpHidCollections();

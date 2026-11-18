@@ -1,8 +1,9 @@
-// IPI PIAO88, 2.4 GHz receiver. Protocol from IPI PIAO v1.0.0.9
+// IPI PIAO88, USB cable and 2.4 GHz receiver. Protocol from IPI PIAO v1.0.0.9
 // (GetMouseData / GetFeatureReport), verified on receiver firmware v115.
 // Feature report 03 reads ten bytes of device information per page. Page 81
 // contains the battery in its first payload byte: bit 7 charging, bits 0..6 percent.
 #include "drivers.h"
+#include "ipi_status.h"
 
 namespace {
 
@@ -29,20 +30,25 @@ bool ReadBattery(HidDev& d, DeviceStatus& s) {
 }  // namespace
 
 void PollIpi(PollContext& ctx) {
-    constexpr USHORT vid = 0x372E, pid = 0x1014;
-    if (ctx.IsClaimed(vid, pid)) return;
-    for (const HidColl* c : ctx.Find(vid, pid, [](const HidColl& c) {
-             return c.page() == 0xFF00 && c.usage() == 1 && c.featLen() == 64;
-         })) {
-        if (HidProduct(*c) != L"PIAO-2.4G") continue;
-        HidDev d;
-        DeviceStatus s;
-        if (!d.OpenFeatureOnly(*c) || !ReadBattery(d, s)) continue;
-        s.key = L"ipi:piao88";
-        s.name = L"IPI PIAO88";
-        s.kind = DeviceKind::Mouse;
-        s.via = L"2.4 GHz receiver";
-        ctx.Add(s, vid, pid);
-        return;
+    constexpr USHORT vid = 0x372E;
+    // Try the direct USB connection first. Both interfaces can exist together
+    // if the dongle is left plugged in while the cable is attached.
+    for (USHORT pid : {0x1056, 0x1014}) {
+        if (ctx.IsClaimed(vid, pid)) continue;
+        const bool wired = pid == 0x1056;
+        for (const HidColl* c : ctx.Find(vid, pid, [](const HidColl& c) {
+                 return c.page() == 0xFF00 && c.usage() == 1 && c.featLen() == 64;
+             })) {
+            if (HidProduct(*c) != (wired ? L"PIAO" : L"PIAO-2.4G")) continue;
+            HidDev d;
+            DeviceStatus s;
+            if (!d.OpenFeatureOnly(*c) || !ReadBattery(d, s)) continue;
+            s.key = kIpiKey;
+            s.name = L"IPI PIAO88";
+            s.kind = DeviceKind::Mouse;
+            s.via = wired ? L"USB cable" : L"2.4 GHz receiver";
+            ctx.Add(s, vid, pid);
+            return;
+        }
     }
 }

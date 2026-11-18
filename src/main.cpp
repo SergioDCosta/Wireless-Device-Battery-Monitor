@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "devices.h"
+#include "drivers/ipi_status.h"
 #include "i18n.h"
 #include "labels.h"
 #include "report.h"
@@ -149,7 +150,7 @@ void SaveOrder() {
 }
 
 bool IsEntryHidden(const TrayEntry& e) {
-    return IsHidden(e.st.key) || (g_hideLastKnown && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0)));
+    return IsHidden(e.st.key) || (g_hideLastKnown && !e.st.updating && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0)));
 }
 
 bool LoadBoolSetting(const wchar_t* name, bool defaultVal) {
@@ -332,6 +333,7 @@ void CopyTip(wchar_t* dst, size_t cap, const std::wstring& s) {
 
 std::wstring StatusText(const TrayEntry& e) {
     const auto& s = e.st;
+    if (s.updating) return T(L"Updating");
     if (!s.connected) return T(L"off / not connected");
     std::wstring t;
     if (!s.levelText.empty() && s.percent >= 0) t = T(s.levelText);
@@ -339,7 +341,10 @@ std::wstring StatusText(const TrayEntry& e) {
     else if (e.lastPct >= 0) t = TF(L"{percent}% (last known)", { { L"percent", std::to_wstring(e.lastPct) } });
     else t = T(L"unknown");
     if (!s.detail.empty() && s.percent >= 0) t += L" (" + s.detail + L")";
-    if (s.charging) t += std::wstring(L", ") + T(L"charging");
+    if (s.charging) {
+        t += std::wstring(L", ") + T(L"charging");
+        if (s.key == kIpiKey) t += std::wstring(L" (") + T(L"device estimate") + L")";
+    }
     if (s.asleep) t += std::wstring(L", ") + T(L"asleep");
     return t;
 }
@@ -397,7 +402,7 @@ void ApplyEntry(TrayEntry& e) {
         if (e.added) { TrayDelete(e.uid); e.added = false; }
         return;
     }
-    int shown = s.percent >= 0 ? s.percent : e.lastPct;
+    int shown = s.updating ? -1 : (s.percent >= 0 ? s.percent : e.lastPct);
     bool dim = s.percent < 0;
     Accent accent = AccentFor(s);
     std::wstring sig = std::to_wstring(shown) + (s.charging ? L"c" : L"") + (dim ? L"d" : L"") + (g_lightTaskbar ? L"l" : L"k") +
@@ -408,11 +413,12 @@ void ApplyEntry(TrayEntry& e) {
         e.iconSig = sig;
     }
     std::wstring tip = s.name + L"\n" + StatusText(e);
+    if (s.key == kIpiKey && !s.via.empty()) tip += L"  [" + T(s.via) + L"]";
 
     const wchar_t* infoTitle = nullptr;
     std::wstring info;
     if (s.charging || shown > LOW_BATTERY + 10) e.lowWarned = false;
-    if (!s.charging && s.percent >= 0 && s.percent <= LOW_BATTERY && !e.lowWarned) {
+    if (!s.charging && !s.updating && s.percent >= 0 && s.percent <= LOW_BATTERY && !e.lowWarned) {
         e.lowWarned = true;
         infoTitle = T(L"Low battery");
         info = TF(L"{name} is at {percent}%", { { L"name", s.name }, { L"percent", std::to_wstring(s.percent) } });
@@ -468,7 +474,12 @@ void UpdateWidget() {
         WidgetItem it;
         it.kind = e->st.kind;
         it.percent = e->st.percent >= 0 ? e->st.percent : e->lastPct;
-        if (e->st.percent >= 0) it.text = T(e->st.levelText);
+        if (e->st.updating) {
+            it.text = L"…";
+            it.percent = -1;
+        } else if (e->st.key == kIpiKey && e->st.charging && e->st.percent >= 0) {
+            it.text = L"≈" + std::to_wstring(it.percent) + L"%";
+        } else if (e->st.percent >= 0) it.text = T(e->st.levelText);
         it.charging = e->st.charging;
         it.dim = e->st.percent < 0;
         it.low = !it.charging && it.percent >= 0 && it.percent <= LOW_BATTERY;
@@ -478,12 +489,13 @@ void UpdateWidget() {
         items.push_back(it);
         if (!tip.empty()) tip += L"\n";
         tip += e->st.name + L": " + StatusText(*e);
+        if (e->st.key == kIpiKey && !e->st.via.empty()) tip += L"  [" + T(e->st.via) + L"]";
     }
     if (tip.empty()) tip = std::wstring(L"Wireless Battery: ") + T(L"No devices with battery info found");
     widget::SetItems(items, tip);
 }
 
-void OnResults(std::vector<DeviceStatus>& results) {
+void OnResults(std::vector<DeviceStatus>& results, bool ipiOnly) {
     std::map<std::wstring, bool> seen;
     for (auto& s : results) {
         auto& e = g_entries[s.key];
@@ -495,6 +507,7 @@ void OnResults(std::vector<DeviceStatus>& results) {
         ApplyEntry(e);
     }
     for (auto it = g_entries.begin(); it != g_entries.end();) {
+        if (ipiOnly && it->first != kIpiKey) { ++it; continue; }
         auto& e = it->second;
         // Some receivers drop sleeping devices from the link; keep showing the last value for a while.
         bool inGrace = !seen.count(it->first) && e.st.graceSec > 0 && e.st.connected &&
@@ -636,7 +649,8 @@ void ShowMenu() {
         AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sub, MF_STRING | (canLeft ? 0 : MF_GRAYED), base + DEV_LEFT, g_wantWidget ? T(L"Move left") : T(L"Move up"));
         AppendMenuW(sub, MF_STRING | (canRight ? 0 : MF_GRAYED), base + DEV_RIGHT, g_wantWidget ? T(L"Move right") : T(L"Move down"));
-        std::wstring line = e->st.name + L":  " + StatusText(*e) + L"   [" + T(e->st.via) + L"]";
+        std::wstring line = e->st.name + L":  " + StatusText(*e);
+        if (!e->st.via.empty()) line += L"   [" + T(e->st.via) + L"]";
         AppendMenuW(m, MF_POPUP | (IsHidden(k) ? 0 : MF_CHECKED), (UINT_PTR)sub, line.c_str());
         keys.push_back(k);
     }
@@ -778,12 +792,22 @@ DWORD WINAPI Worker(LPVOID) {
     constexpr DWORD startupPollDelays[] = { 3000, 7000, 15000 };
     size_t startupPoll = 0;
     HANDLE events[2] = { g_stopEvt, g_refreshEvt };
+    IpiMonitor ipi;
+    ULONGLONG nextFull = 0;
+    bool full = true;
     for (;;) {
-        auto* v = new std::vector<DeviceStatus>(g_demo ? DemoDevices() : PollAllDevices());
-        if (!PostMessageW(g_hwnd, WM_RESULTS, 0, (LPARAM)v)) delete v;
-        DWORD delay = POLL_INTERVAL_MS;
-        if (startupPoll < ARRAYSIZE(startupPollDelays)) delay = startupPollDelays[startupPoll++];
-        if (WaitForMultipleObjects(2, events, FALSE, delay) == WAIT_OBJECT_0) return 0;
+        auto* v = new std::vector<DeviceStatus>(g_demo ? DemoDevices() : full ? PollAllDevices() : PollIpiDevices());
+        const ULONGLONG now = GetTickCount64();
+        DWORD ipiDelay = g_demo ? POLL_INTERVAL_MS : ipi.Update(*v, now);
+        if (!PostMessageW(g_hwnd, WM_RESULTS, !full, (LPARAM)v)) delete v;
+        if (full) {
+            DWORD interval = startupPoll < ARRAYSIZE(startupPollDelays) ? startupPollDelays[startupPoll++] : POLL_INTERVAL_MS;
+            nextFull = now + interval;
+        }
+        DWORD delay = (DWORD)std::min<ULONGLONG>(ipiDelay, nextFull > now ? nextFull - now : 0);
+        DWORD event = WaitForMultipleObjects(2, events, FALSE, delay);
+        if (event == WAIT_OBJECT_0 || event == WAIT_FAILED) return 0;
+        full = event == WAIT_OBJECT_0 + 1 || GetTickCount64() >= nextFull;
     }
 }
 
@@ -800,7 +824,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_RESULTS: {
             auto* v = reinterpret_cast<std::vector<DeviceStatus>*>(lp);
-            OnResults(*v);
+            OnResults(*v, wp != 0);
             delete v;
             return 0;
         }

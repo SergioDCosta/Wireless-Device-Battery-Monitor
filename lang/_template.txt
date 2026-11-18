@@ -10,6 +10,8 @@
 # Menus, status and notifications
 off / not connected = 
 {percent}% (last known) = 
+device estimate =
+Updating =
 unknown = 
 charging = 
 asleep = 
