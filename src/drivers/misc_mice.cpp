@@ -111,13 +111,20 @@ void PollMotospeed(PollContext& ctx) {
     }
 }
 
-// Xenta receiver (1D57:FA60, also FA65; cable FA55 / 2155), used by Delux and Attack Shark mice.
+// Xenta receiver (1D57:FA60, FA61, FA65; cable FA55 / 2155), used by Delux and Attack Shark mice.
+// FA61 is reported by an Attack Shark X6 (device request #2544, untested): same 000A:0000 collection
+// and the model code 0x10 already listed below for the X6 / R1.
 // M900 Pro reports model 30/event 40 (documented) and model 50/event 41 (captured from hardware).
 // Receivers broadcast [03][model][event][state][level] every ~2 s; nothing is sent to them. The handle
 // stays open between polls so these frames queue up. A reading counts once two frames agree, because
 // every link-up starts with a false 100% (github.com/qu1ncky/BatteryTray, XentaReceiverProvider).
 struct XentaModel { BYTE code; const wchar_t* name; bool tens; };
 const XentaModel kXentaModels[] = {
+    // Official Inphic HUB model table: https://hub.inphic.cn/assets/index-BcHQx9B6.js
+    // A device sold as IN10 MAX reported 0x73 (IN10RMax in HUB), 03 73 41 01 64,
+    // on 1D57:FA65 / "Inphic KP 8K". Keep the firmware model names distinct.
+    { 0x73, L"Inphic IN10R MAX", false },
+    { 0x74, L"Inphic IN10 MAX", false },  // official table; not hardware-tested
     { 0x3D, L"Delux M900 Pro", false },
     { 0x30, L"Delux M900 Pro", false },
     { 0x50, L"Delux M900 Pro", false },
@@ -142,7 +149,7 @@ struct XentaListener {
 std::map<std::wstring, XentaListener> g_xenta;  // by collection path
 
 void PollXenta(PollContext& ctx) {
-    const USHORT pids[] = { 0xFA60, 0xFA65, 0xFA55, 0x2155 };
+    const USHORT pids[] = { 0xFA60, 0xFA61, 0xFA65, 0xFA55, 0x2155 };
     std::set<std::wstring> present;
     for (USHORT pid : pids) {
         if (ctx.IsClaimed(0x1D57, pid)) continue;

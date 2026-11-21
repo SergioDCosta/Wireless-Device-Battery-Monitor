@@ -27,10 +27,10 @@ public:
     unsigned Update(std::vector<DeviceStatus>& devices, std::uint64_t now) {
         auto it = std::find_if(devices.begin(), devices.end(), [](const DeviceStatus& d) { return d.key == kIpiKey; });
         if (it == devices.end()) {
-            if (via_.empty()) return 60000;
+            if (via_.empty()) return UINT32_MAX;  // no targeted refresh until the next full poll
             if (now - lastSeen_ > 15000) {
                 via_.clear();
-                return 60000;
+                return UINT32_MAX;  // no targeted refresh until the next full poll
             }
             DeviceStatus pending;
             pending.key = kIpiKey;

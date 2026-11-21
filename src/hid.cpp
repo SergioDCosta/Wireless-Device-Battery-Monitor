@@ -12,6 +12,8 @@
 #include <cstring>
 #include <cwctype>
 
+std::vector<HidColl> EnumHid() { return EnumHid(nullptr); }
+
 std::vector<HidColl> EnumHid(bool (*includePath)(const std::wstring&)) {
     std::vector<HidColl> out;
     GUID hidGuid;
